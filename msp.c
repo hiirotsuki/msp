@@ -100,6 +100,7 @@ int write_bmp_header(FILE *bmp, long filesize, int width, int height)
 
 int main(int argc, char **argv)
 {
+	int i;
 	char *p;
 	FILE *msp, *out;
 	long filesize, l;
@@ -158,7 +159,8 @@ int main(int argc, char **argv)
 		{
 			written = 0;
 			pads_written += pad;
-			fwrite("\x00", 1, pad, out);
+			for(i = 0; i < pad; i++)
+				fputc('\x00', out);
 		}
 		fputc(fgetc(msp), out);
 		written++;
@@ -167,7 +169,8 @@ int main(int argc, char **argv)
 	pad = (filesize + pads_written) % 4;
 
 	if(pad)
-		fwrite("\x00", 1, pad, out);
+		for(i = 0; i < pad; i++)
+			fputc('\x00', out);
 
 	/* write BMP header */
 	filesize = ftell(out);
