@@ -75,7 +75,7 @@ int write_pbm_p1_data(FILE *pbm, unsigned char *buf, int len)
 	return fwrite(buf, 1, len, pbm);
 }
 
-int write_bmp_header(FILE *bmp, long filesize, int width, int height)
+int fwrite_bmp_header(FILE *bmp, long filesize, int width, int height)
 {
 	fwrite("\x42\x4D", 2, 1, bmp);
 	fwrite_uint32_le(filesize, bmp); /* size */
@@ -83,7 +83,7 @@ int write_bmp_header(FILE *bmp, long filesize, int width, int height)
 	fwrite("\x3e\x00\x00\x00", 4, 1, bmp); /* data offset */
 	fwrite("\x28\x00\x00\x00", 4, 1, bmp); /* header size */
 	fwrite_uint32_le(width, bmp);
-	fwrite_int32_le(-height, bmp); /* yes, yes, really. */
+	fwrite_uint32_le(height, bmp);
 	fwrite("\x01\x00", 2, 1, bmp);
 	fwrite("\x01\x00", 2, 1, bmp); /* 1-bit BMP */
 	fwrite("\x00\x00\x00\x00", 4, 1, bmp);
@@ -98,14 +98,31 @@ int write_bmp_header(FILE *bmp, long filesize, int width, int height)
 	return 0;
 }
 
+int swap_vertical(unsigned char *inbuf, unsigned char *outbuf, int offset, int width, int height, int bpp)
+{
+	int j, stride;
+
+	inbuf += offset;
+	stride = (((width * bpp) + 7) / 8 + 3) & ~3;
+	outbuf += (height - 1) * stride;
+	for(j = 0; j < height; j++)
+	{
+		memcpy(outbuf, inbuf, stride);
+		inbuf += stride;
+		outbuf -= stride;
+	}
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
-	int i;
 	char *p;
 	FILE *msp, *out;
 	long filesize, l;
-	struct mspaint *head;
-	int written, pads_written, pad, line;
+	int stride, mapsize;
+	struct mspaint head;
+	unsigned char *t, *inbuf, *outbuf;
 
 	if(argc < 2)
 	{
@@ -125,15 +142,7 @@ int main(int argc, char **argv)
 	filesize = ftell(msp) - sizeof(struct mspaint);
 	fseek(msp, 0, SEEK_SET);
 
-	head = malloc(sizeof(struct mspaint));
-
-	if(!head)
-	{
-		fprintf(stderr, "out of memory\n");
-		return 1;
-	}
-
-	read_header(msp, head);
+	read_header(msp, &head);
 
 	p = strrchr(argv[1], '.');
 	memcpy(p + 1, "bmp", 3);
@@ -146,54 +155,23 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	line = head->width / 8;
-	pad = line % 4;
+	stride = ((head.width + 7) / 8 + 3) & ~3;
+	mapsize = head.height * stride;
+	inbuf = calloc(mapsize, 1);
+	outbuf = calloc(mapsize, 1);
 
-	fseek(out, 62, SEEK_SET);
-
-	written = 0;
-	pads_written = 0;
+	t = inbuf;
 	for(l = 0; l < filesize; l++)
 	{
-		if(written == line && pad != 0)
-		{
-			written = 0;
-			pads_written += pad;
-			for(i = 0; i < pad; i++)
-				fputc('\x00', out);
-		}
-		fputc(fgetc(msp), out);
-		written++;
+		fread(inbuf, 1, head.width / 8, msp);
+		inbuf += stride;
 	}
+	inbuf = t;
 
-	pad = (filesize + pads_written) % 4;
+	swap_vertical(inbuf, outbuf, 0, head.width, head.height, 1);
 
-	if(pad)
-		for(i = 0; i < pad; i++)
-			fputc('\x00', out);
-
-	/* write BMP header */
-	filesize = ftell(out);
-	fseek(out, 0, SEEK_SET);
-
-	write_bmp_header(out, filesize, head->width, head->height);
-
-	/*len = head->width * head->height / 8;
-
-	out = fopen("TEST1.PBM", "wb");
-
-	write_pbm_p1_header(out, head->width, head->height);
-	while(len--)
-	{
-		unsigned char buf[8];
-		unsigned char *pbuf = buf;
-
-		read_bits(fgetc(msp), pbuf);
-		write_pbm_p1_data(out, pbuf, 8);
-	}*/
-
-	if(head)
-		free(head);
+	fwrite_bmp_header(out, mapsize, head.width, head.height);
+	fwrite(outbuf, 1, mapsize, out);
 
 	fclose(msp);
 	fclose(out);
