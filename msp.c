@@ -7,8 +7,7 @@
 
 struct mspaint
 {
-	unsigned short magic1;
-	unsigned short magic2;
+	unsigned char magic[4];
 	unsigned short width;
 	unsigned short height;
 	unsigned short xarbitmap;
@@ -44,8 +43,7 @@ int read_header(FILE *file, struct mspaint *head)
 	if(fread(buf, 1, 32, file) != 32)
 		return -1;
 
-	head->magic1   = to_short(buf);
-	head->magic2   = to_short(buf + 2);
+	memcpy(head->magic, buf, 4);
 	head->width    = to_short(buf + 4);
 	head->height   = to_short(buf + 6);
 	head->checksum = to_short(buf + 24);
@@ -115,6 +113,23 @@ int swap_vertical(unsigned char *inbuf, unsigned char *outbuf, int offset, int w
 	return 0;
 }
 
+int check_file_ext(const char *filename, const char *ext, size_t len)
+{
+	char *dot = strrchr(filename, '.');
+
+	if(!dot || dot == filename)
+		return 1;
+
+	if(strlen(dot + 1) != len)
+		return 1;
+
+	if(ext)
+		if(memcmp(dot + 1, ext, len))
+			return 1;
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	char *p;
@@ -126,7 +141,7 @@ int main(int argc, char **argv)
 
 	if(argc < 2)
 	{
-		fprintf(stderr, "usage: %s file.msp", argv[0]);
+		fprintf(stderr, "usage: %s file.msp\n", argv[0]);
 		return 2;
 	}
 
@@ -142,7 +157,17 @@ int main(int argc, char **argv)
 	filesize = ftell(msp) - sizeof(struct mspaint);
 	fseek(msp, 0, SEEK_SET);
 
-	read_header(msp, &head);
+	if(read_header(msp, &head) != 0)
+	{
+		fprintf(stderr, "failed to read header data from file '%s', truncated?\n", argv[1]);
+		return 1;
+	}
+
+	if((memcmp(head.magic, "\x44\x61", 2)) || check_file_ext(argv[1], NULL, 3))
+	{
+		fprintf(stderr, "file '%s' is not a valid MSP image\n", argv[1]);
+		return 1;
+	}
 
 	p = strrchr(argv[1], '.');
 	memcpy(p + 1, "bmp", 3);
